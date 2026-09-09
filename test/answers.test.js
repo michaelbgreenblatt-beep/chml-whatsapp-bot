@@ -7,3 +7,20 @@ test('answers the league sexiest-owner joke', async () => {
   assert.equal((await answerQuestion({}, 'who is the sexiest owner in the league?')).reply, expected);
   assert.equal((await answerQuestion({}, "who's the sexiest owner?")).reply, expected);
 });
+
+const archive = { seasons: {
+  2023: { standings: [
+    { owner: 'First Owner', owners: ['First Owner'], rank: 1, w: 10, l: 4, t: 0, pf: 1700 },
+    { owner: 'Last Owner', owners: ['Last Owner'], rank: 12, w: 2, l: 12, t: 0, pf: 1300.25 }
+  ] },
+  2026: { standings: [{ owner: 'Nobody Yet', rank: null, w: 0, l: 0, t: 0, pf: 0 }] }
+} };
+
+test('answers last-place and ordinal standings questions from statistics', async () => {
+  assert.equal((await answerQuestion(archive, 'who came in last place in 2023?')).reply,
+    'Last Owner finished 12th in the 2023 standings with a 2-12 record and 1,300.25 points.');
+  assert.equal((await answerQuestion(archive, 'who finished 1st in 2023?')).reply,
+    'First Owner finished 1st in the 2023 standings with a 10-4 record and 1,700 points.');
+  assert.equal((await answerQuestion(archive, 'who came in last place in 2026?')).reply,
+    '2026 does not have final standings yet.');
+});

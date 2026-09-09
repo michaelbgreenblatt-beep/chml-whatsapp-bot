@@ -138,6 +138,28 @@ function tradeBook(a) {
   return [...book.values()].map(b => ({ ...b, got:round(b.got), gave:round(b.gave), net:round(b.net), perTrade:b.trades?round(b.net/b.trades):0 })).sort((x,y)=>y.net-x.net);
 }
 function playerList(players) { return players.map(p => p.name).slice(0,3).join(', ') || 'no started points'; }
+function answerStandings(a, q) {
+  const year = q.match(/\b(20\d{2})\b/)?.[1];
+  if (!year) return null;
+  const season = a.seasons?.[year];
+  const standings = season?.standings?.filter(row => row.rank != null && Number.isFinite(Number(row.rank))) || [];
+  if (!standings.length) {
+    if (/(?:last place|finished last|came in last|worst record|standings|finished \d+)/.test(q) && season) {
+      return { reply: `${year} does not have final standings yet.`, confidence: 'exact' };
+    }
+    return null;
+  }
+  let row;
+  if (/(?:last place|finished last|came in last|dead last|worst record)/.test(q)) {
+    row = standings.reduce((last, candidate) => Number(candidate.rank) > Number(last.rank) ? candidate : last);
+  } else {
+    const ordinal = q.match(/\b(\d{1,2})(?:st|nd|rd|th)?\s+(?:place|overall)\b|\bfinished\s+(\d{1,2})(?:st|nd|rd|th)?\b/);
+    if (ordinal) row = standings.find(candidate => Number(candidate.rank) === Number(ordinal[1] || ordinal[2]));
+  }
+  if (!row) return null;
+  const names = (row.owners?.length ? row.owners : [row.owner]).join(' / ');
+  return { reply: `${names} finished ${Number(row.rank)}${Number(row.rank) === 1 ? 'st' : Number(row.rank) === 2 ? 'nd' : Number(row.rank) === 3 ? 'rd' : 'th'} in the ${year} standings with a ${rec(row.w, row.l, row.t)} record and ${fmt(row.pf, 2)} points.`, confidence: 'exact' };
+}
 function answerTradeGrades(a, q) {
   if (!/trade/.test(q)) return null;
   const grades = tradeGrades(a);
@@ -167,6 +189,7 @@ async function answerQuestion(a, question) {
   if (/\b(?:who(?:'s| is)?|which owner(?: is)?)\b.*\bsexiest\b|\bsexiest\b.*\bowner\b/.test(q)) {
     return { reply: 'Typically Bruno, or Tucker when Tucker shaves his rectum.', confidence: 'exact' };
   }
+  const standingsAnswer = answerStandings(a, q); if (standingsAnswer) return standingsAnswer;
   const tradeAnswer = answerTradeGrades(a, q); if (tradeAnswer) return tradeAnswer;
   if (/(championship|title|champion).*(most)|most.*(championship|title)/.test(q)) {
     const m = new Map(); for (const c of champions(a)) m.set(c.owner, (m.get(c.owner)||0)+1);
