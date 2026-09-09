@@ -1,0 +1,15 @@
+[Unit]
+Description=CHML WhatsApp Bot
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/chml-whatsapp-bot
+EnvironmentFile=/opt/chml-whatsapp-bot/.env
+ExecStart=/usr/bin/node src/server.js
+Restart=always
+RestartSec=5
+User=chmlbot
+
+[Install]
+WantedBy=multi-user.target
