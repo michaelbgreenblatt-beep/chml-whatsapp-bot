@@ -9,6 +9,7 @@ const groupName = process.env.WHATSAPP_GROUP_NAME || 'CHML';
 const groupJid = process.env.WHATSAPP_GROUP_JID || '';
 const authDir = process.env.WHATSAPP_AUTH_DIR || './auth/whatsapp';
 const refreshMinutes = Number(process.env.CHML_REFRESH_MINUTES || 30);
+const allowSelf = process.env.WHATSAPP_ALLOW_SELF !== 'false';
 const logger = P({ level: process.env.LOG_LEVEL || 'info' });
 let archive;
 let sock;
@@ -45,7 +46,7 @@ async function connect() {
   sock.ev.on('creds.update', saveCreds);
   sock.ev.on('connection.update', async ({ connection, lastDisconnect, qr }) => {
     if (qr) await printQr(qr);
-    if (connection === 'open') logger.info('WhatsApp connected');
+    if (connection === 'open') logger.info({ groupName, groupJid: groupJid || '(matching by group name)', allowSelf }, 'WhatsApp connected');
     if (connection === 'close') {
       const code = lastDisconnect?.error?.output?.statusCode;
       logger.warn({ code }, 'WhatsApp disconnected');
@@ -56,15 +57,16 @@ async function connect() {
   sock.ev.on('messages.upsert', async ({ messages }) => {
     for (const msg of messages) {
       try {
-        if (!msg.message || msg.key.fromMe) continue;
+        if (!msg.message) continue;
+        if (msg.key.fromMe && !allowSelf) continue;
         const chatId = msg.key.remoteJid;
         if (!chatId?.endsWith('@g.us')) continue;
-        if (groupJid && chatId !== groupJid) continue;
         const meta = await sock.groupMetadata(chatId).catch(() => null);
-        if (!groupJid && meta?.subject && !meta.subject.toLowerCase().includes(groupName.toLowerCase())) continue;
         const text = bodyOf(msg.message);
-        if (!wasMentioned(msg.message, text)) continue;
-        logger.info({ group: meta?.subject || chatId, from: msg.key.participant }, 'answering CHML question');
+        const isRightGroup = groupJid ? chatId === groupJid : !!meta?.subject?.toLowerCase().includes(groupName.toLowerCase());
+        const isMentioned = wasMentioned(msg.message, text);
+        logger.info({ group: meta?.subject || chatId, chatId, fromMe: msg.key.fromMe, isRightGroup, isMentioned, text: text.slice(0, 80) }, 'saw group message');
+        if (!isRightGroup || !isMentioned) continue;
         const answer = await answerQuestion(archive, text);
         await sock.sendMessage(chatId, { text: answer.reply }, { quoted: msg });
       } catch (err) {
