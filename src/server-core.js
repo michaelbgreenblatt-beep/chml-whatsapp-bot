@@ -3,10 +3,19 @@ try { require('dotenv').config(); } catch {}
 const DATA_BASE = (process.env.CHML_DATA_BASE_URL || 'https://chml-history.netlify.app').replace(/\/$/, '');
 const SITE_URL = process.env.CHML_SITE_URL || 'https://chml-history.netlify.app/#/';
 const BOT_NAMES = ['chmlbot', 'chml bot', '@chmlbot', '@chml bot'];
+const FINAL_WEEK = 17;
+const HANDLE_TO_OWNER = new Map(Object.entries({
+  Blatttman: 'Michael Greenblatt', JGropp731: 'Jordan Gropper', zstauber: 'Zach Stauber',
+  '09fdisanti': 'Frank DiSanti', Reedybaby24: 'Reed Marcus', mattgold4: 'Matt Gold',
+  cpadell: 'Cory Padell', kking1234: 'Kenny King', bkarp: 'Ben Karp', K3N4K1NG: 'Kenny King',
+  ddisa10: 'Doug DiSanti', tcushing: 'Tucker Cushing', brote: 'Bruno Rotellini', Victorlaz: 'Victor Lazares', maxgold91: 'Max Gold'
+}));
 
 const fmt = (n, d = 1) => Number(n).toLocaleString('en-US', { maximumFractionDigits: d });
+const round = n => Math.round(Number(n || 0) * 100) / 100;
 const rec = (w, l, t = 0) => t ? `${w}-${l}-${t}` : `${w}-${l}`;
 const key = s => String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+const ownerOf = handle => HANDLE_TO_OWNER.get(handle) || handle;
 const owners = side => side?.owners || [side?.owner].filter(Boolean);
 const winnerOf = g => g.winnerId ?? (Number(g.left?.score) === Number(g.right?.score) ? null : Number(g.left?.score) > Number(g.right?.score) ? g.left.id : g.right.id);
 
@@ -15,7 +24,6 @@ async function text(path) {
   if (!r.ok) throw new Error(`Failed loading ${path}: ${r.status}`);
   return r.text();
 }
-
 async function json(path) { return JSON.parse(await text(path)); }
 
 function extractStrings(source, label) {
@@ -73,10 +81,90 @@ function champions(a) {
   });
 }
 
+function lineupIndex(season) {
+  const cells = new Map();
+  for (const g of season.games || []) for (const side of [g.left, g.right]) {
+    if (!side?.rows) continue;
+    for (const r of side.rows) if (r.id) cells.set(`${r.id}|${side.owner}|${g.week}`, { points: Number(r.points) || 0, started: r.group === 'Starters' });
+  }
+  return cells;
+}
+function haul(cells, playerId, owner, fromWeek) {
+  let started = 0, benched = 0, weeksStarted = 0, weeksHeld = 0;
+  for (let w = fromWeek + 1; w <= FINAL_WEEK; w++) {
+    const c = cells.get(`${playerId}|${owner}|${w}`);
+    if (!c) continue;
+    weeksHeld++;
+    if (c.started) { started += c.points; weeksStarted++; } else benched += c.points;
+  }
+  return { started: round(started), benched: round(benched), weeksStarted, weeksHeld };
+}
+function txnsFor(a, year) { return a.transactions?.seasons?.[String(year)]?.transactions || []; }
+function gradeTrade(rec, season, cells) {
+  const week = rec.week;
+  const weeksLeft = Math.max(0, FINAL_WEEK - week);
+  const receiverOf = new Map((rec.adds || []).map(x => [x.id, ownerOf(x.owner)]));
+  const names = new Set([...(rec.owners || []).map(ownerOf), ...(rec.adds || []).map(x => ownerOf(x.owner)), ...(rec.drops || []).map(x => ownerOf(x.owner))]);
+  const sides = [...names].map(owner => {
+    const received = (rec.adds || []).filter(x => ownerOf(x.owner) === owner).map(x => ({ name: x.name, ...haul(cells, x.id, owner, week) }));
+    const sent = (rec.drops || []).filter(x => ownerOf(x.owner) === owner).map(x => {
+      const to = receiverOf.get(x.id);
+      return { name: x.name, to, ...haul(cells, x.id, to, week) };
+    });
+    const got = round(received.reduce((s,p)=>s+p.started,0));
+    const gave = round(sent.reduce((s,p)=>s+p.started,0));
+    return { owner, received, sent, got, gave, net: round(got - gave), benched: round(received.reduce((s,p)=>s+p.benched,0)), perWeek: weeksLeft ? round(got / weeksLeft) : 0 };
+  }).sort((x,y)=>y.net-x.net);
+  return { id: rec.id, year: season.year, week, weeksLeft, sides, winner: sides[0]?.net > 0 ? sides[0].owner : null, loser: sides.at(-1)?.net < 0 ? sides.at(-1).owner : null, spread: sides.length ? round(sides[0].net - sides.at(-1).net) : 0 };
+}
+function tradeGrades(a) {
+  return Object.keys(a.transactions?.seasons || {}).flatMap(year => {
+    const season = a.seasons[String(year)];
+    if (!season) return [];
+    const cells = lineupIndex(season);
+    return txnsFor(a, year).filter(r => r.type === 'trade').map(r => gradeTrade(r, season, cells));
+  });
+}
+function tradeBook(a) {
+  const book = new Map();
+  for (const t of tradeGrades(a)) for (const s of t.sides) {
+    const b = book.get(s.owner) || { owner:s.owner, trades:0, won:0, lost:0, even:0, got:0, gave:0, net:0, best:null, worst:null };
+    b.trades++; if (s.net > 0) b.won++; else if (s.net < 0) b.lost++; else b.even++;
+    b.got += s.got; b.gave += s.gave; b.net += s.net;
+    if (!b.best || s.net > b.best.side.net) b.best = { trade:t, side:s };
+    if (!b.worst || s.net < b.worst.side.net) b.worst = { trade:t, side:s };
+    book.set(s.owner, b);
+  }
+  return [...book.values()].map(b => ({ ...b, got:round(b.got), gave:round(b.gave), net:round(b.net), perTrade:b.trades?round(b.net/b.trades):0 })).sort((x,y)=>y.net-x.net);
+}
+function playerList(players) { return players.map(p => p.name).slice(0,3).join(', ') || 'no started points'; }
+function answerTradeGrades(a, q) {
+  if (!/trade/.test(q)) return null;
+  const grades = tradeGrades(a);
+  if (!grades.length) return { reply: 'No trade-grade data is available yet. The archive has transaction records from 2021 onward.', confidence:'exact' };
+  const book = tradeBook(a);
+  const owner = [...a.ownerMap.values()].find(o => q.includes(key(o).split(' ')[0]) || q.includes(key(o)));
+  if (owner && /(grade|trade|trading|record)/.test(q)) {
+    const b = book.find(x => x.owner === owner);
+    if (b) return { reply: `${owner} trade grades since 2021: ${rec(b.won,b.lost,b.even)} over ${b.trades} trades, net ${fmt(b.net,1)} starter points. Best: +${fmt(b.best.side.net,1)} in ${b.best.trade.year} week ${b.best.trade.week}. Worst: ${fmt(b.worst.side.net,1)} in ${b.worst.trade.year} week ${b.worst.trade.week}.`, confidence:'exact' };
+  }
+  if (/worst|biggest loss|lost/.test(q)) {
+    const t = grades.slice().sort((x,y)=>x.sides.at(-1).net-y.sides.at(-1).net)[0], s = t.sides.at(-1);
+    return { reply: `Worst graded trade side: ${s.owner} in ${t.year} week ${t.week}, net ${fmt(s.net,1)} starter points. Got ${fmt(s.got,1)} from ${playerList(s.received)}; gave up ${fmt(s.gave,1)}.`, confidence:'exact' };
+  }
+  if (/best|won|winner|steal/.test(q)) {
+    const t = grades.slice().sort((x,y)=>y.sides[0].net-x.sides[0].net)[0], s = t.sides[0];
+    return { reply: `Best graded trade side: ${s.owner} in ${t.year} week ${t.week}, net +${fmt(s.net,1)} starter points. Got ${fmt(s.got,1)} from ${playerList(s.received)}; gave up ${fmt(s.gave,1)}.`, confidence:'exact' };
+  }
+  const leaders = book.slice(0,3).map(b => `${b.owner} ${fmt(b.net,1)} (${rec(b.won,b.lost,b.even)})`).join('; ');
+  return { reply: `Trade-grade leaders since 2021 by net starter points: ${leaders}. Ask “chmlbot best trade” or “chmlbot Frank trade grades” for details.`, confidence:'exact' };
+}
+
 async function answerQuestion(a, question) {
   const clean = String(question || '').replace(/@\S+/g, '').trim();
   const q = clean.toLowerCase();
   if (!clean) return { reply: 'Tag me with a CHML question and I will check the archive.', confidence: 'empty' };
+  const tradeAnswer = answerTradeGrades(a, q); if (tradeAnswer) return tradeAnswer;
   if (/(championship|title|champion).*(most)|most.*(championship|title)/.test(q)) {
     const m = new Map(); for (const c of champions(a)) m.set(c.owner, (m.get(c.owner)||0)+1);
     const rows = [...m].map(([owner,titles])=>({owner,titles})).sort((x,y)=>y.titles-x.titles || x.owner.localeCompare(y.owner));
