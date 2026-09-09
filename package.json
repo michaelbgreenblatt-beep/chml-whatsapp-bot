@@ -1,1 +1,30 @@
-{"name":"chml-whatsapp-bot","version":"0.2.0","private":true,"description":"Single-process WhatsApp bot for CHML history Q&A.","type":"commonjs","engines":{"node":">=20"},"scripts":{"start":"node src/whatsapp.js","whatsapp":"node src/whatsapp.js","server":"node src/server.js","ask":"node bin/ask.js","smoke":"node bin/ask.js \"who has the most championships\" && node bin/ask.js \"closest game ever\" && node bin/ask.js \"jordan vs frank\""},"dependencies":{"@whiskeysockets/baileys":"^6.7.18","dotenv":"^16.4.7","express":"^4.21.2","openai":"^4.77.0","pino":"^9.6.0","qrcode":"^1.5.4"}}
+{
+  "name": "chml-whatsapp-bot",
+  "version": "0.2.0",
+  "private": true,
+  "description": "Single-process WhatsApp bot for CHML history Q&A.",
+  "type": "commonjs",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node src/whatsapp.js",
+    "whatsapp": "node src/whatsapp.js",
+    "server": "node src/server.js",
+    "ask": "node bin/ask.js",
+    "smoke": "node bin/ask.js \"who has the most championships\" && node bin/ask.js \"closest game ever\" && node bin/ask.js \"jordan vs frank\"",
+    "test": "node --test",
+    "groups": "node bin/groups.js"
+  },
+  "dependencies": {
+    "@whiskeysockets/baileys": "6.7.24",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "openai": "^4.77.0",
+    "pino": "^9.6.0",
+    "qrcode": "^1.5.4"
+  },
+  "overrides": {
+    "qs": "^6.16.0"
+  }
+}

@@ -1,79 +1,24 @@
-const makeWASocket = require('@whiskeysockets/baileys').default;
-const { DisconnectReason, useMultiFileAuthState, fetchLatestBaileysVersion } = require('@whiskeysockets/baileys');
-const P = require('pino');
-const QRCode = require('qrcode');
-const { loadArchive, answerQuestion, BOT_NAMES } = require('./server-core');
-try { require('dotenv').config(); } catch {}
-
-const groupName = process.env.WHATSAPP_GROUP_NAME || 'CHML';
-const groupJid = process.env.WHATSAPP_GROUP_JID || '';
-const authDir = process.env.WHATSAPP_AUTH_DIR || './auth/whatsapp';
-const refreshMinutes = Number(process.env.CHML_REFRESH_MINUTES || 30);
-const allowSelf = process.env.WHATSAPP_ALLOW_SELF !== 'false';
-const logger = P({ level: process.env.LOG_LEVEL || 'info' });
-let archive;
-let sock;
-
-function bodyOf(message) {
-  return message?.conversation || message?.extendedTextMessage?.text || message?.imageMessage?.caption || message?.videoMessage?.caption || '';
-}
-
-function wasMentioned(message, text) {
-  const lower = String(text || '').toLowerCase();
-  const mentionedJids = message?.extendedTextMessage?.contextInfo?.mentionedJid || [];
-  const myJid = sock?.user?.id ? sock.user.id.split(':')[0] + '@s.whatsapp.net' : '';
-  return mentionedJids.includes(myJid) || BOT_NAMES.some(name => lower.includes(name));
-}
-
-async function printQr(qr) {
-  const small = await QRCode.toString(qr, { type: 'terminal', small: true });
-  console.log('\nScan this QR from the BOT WhatsApp account: WhatsApp > Settings > Linked devices > Link a device\n');
-  console.log(small);
-}
-
-async function refreshArchive() {
-  archive = await loadArchive();
-  logger.info({ games: archive.allGames.length, seasons: archive.years.length }, 'CHML archive loaded');
-}
-
-async function connect() {
-  await refreshArchive();
-  if (refreshMinutes > 0) setInterval(refreshArchive, refreshMinutes * 60 * 1000).unref();
-
-  const { state, saveCreds } = await useMultiFileAuthState(authDir);
-  const { version } = await fetchLatestBaileysVersion();
-  sock = makeWASocket({ version, auth: state, logger: P({ level: process.env.BAILEYS_LOG_LEVEL || 'silent' }), browser: ['CHMLBot', 'Chrome', '1.0'] });
-  sock.ev.on('creds.update', saveCreds);
-  sock.ev.on('connection.update', async ({ connection, lastDisconnect, qr }) => {
-    if (qr) await printQr(qr);
-    if (connection === 'open') logger.info({ groupName, groupJid: groupJid || '(matching by group name)', allowSelf }, 'WhatsApp connected');
-    if (connection === 'close') {
-      const code = lastDisconnect?.error?.output?.statusCode;
-      logger.warn({ code }, 'WhatsApp disconnected');
-      if (code !== DisconnectReason.loggedOut) connect().catch(err => logger.error(err));
-    }
+require('dotenv').config();
+const { loadArchive, answerQuestion } = require('./server-core');
+const { readConfig, createListener } = require('./whatsapp-listener');
+async function main() {
+  const config = readConfig(process.env);
+  const baileys = await import('@whiskeysockets/baileys');
+  const logger = require('pino')({ level: process.env.LOG_LEVEL || 'info' });
+  const QRCode = require('qrcode');
+  process.umask(0o077);
+  const { state, saveCreds } = await baileys.useMultiFileAuthState(config.authDir);
+  const listener = createListener({ config, loadArchive, answerQuestion, saveCreds, logger,
+    makeSocket: () => baileys.default({ auth: state,
+      logger: require('pino')({ level: process.env.BAILEYS_LOG_LEVEL || 'silent' }),
+      syncFullHistory: false, markOnlineOnConnect: false }),
+    printQr: async qr => {
+      console.log('WhatsApp > Settings > Linked devices > Link a device');
+      console.log(await QRCode.toString(qr, { type: 'terminal', small: true }));
+    }, onFatal: () => { process.exitCode = 1; }
   });
-
-  sock.ev.on('messages.upsert', async ({ messages }) => {
-    for (const msg of messages) {
-      try {
-        if (!msg.message) continue;
-        if (msg.key.fromMe && !allowSelf) continue;
-        const chatId = msg.key.remoteJid;
-        if (!chatId?.endsWith('@g.us')) continue;
-        const meta = await sock.groupMetadata(chatId).catch(() => null);
-        const text = bodyOf(msg.message);
-        const isRightGroup = groupJid ? chatId === groupJid : !!meta?.subject?.toLowerCase().includes(groupName.toLowerCase());
-        const isMentioned = wasMentioned(msg.message, text);
-        logger.info({ group: meta?.subject || chatId, chatId, fromMe: msg.key.fromMe, isRightGroup, isMentioned, text: text.slice(0, 80) }, 'saw group message');
-        if (!isRightGroup || !isMentioned) continue;
-        const answer = await answerQuestion(archive, text);
-        await sock.sendMessage(chatId, { text: answer.reply }, { quoted: msg });
-      } catch (err) {
-        logger.error({ err }, 'failed handling message');
-      }
-    }
-  });
+  for (const signal of ['SIGINT', 'SIGTERM']) process.once(signal, () => void listener.stop());
+  await listener.start();
 }
-
-connect().catch(err => { logger.error(err); process.exit(1); });
+if (require.main === module) main().catch(err => { console.error(err); process.exitCode = 1; });
+module.exports = { main };

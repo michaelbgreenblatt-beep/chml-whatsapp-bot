@@ -7,7 +7,7 @@ Type=simple
 WorkingDirectory=/opt/chml-whatsapp-bot
 EnvironmentFile=/opt/chml-whatsapp-bot/.env
 ExecStart=/usr/bin/node src/whatsapp.js
-Restart=always
+Restart=on-abnormal
 RestartSec=5
 User=chmlbot
 
