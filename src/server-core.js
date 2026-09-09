@@ -164,6 +164,9 @@ async function answerQuestion(a, question) {
   const clean = String(question || '').replace(/@\S+/g, '').trim();
   const q = clean.toLowerCase();
   if (!clean) return { reply: 'Tag me with a CHML question and I will check the archive.', confidence: 'empty' };
+  if (/\b(?:who(?:'s| is)?|which owner(?: is)?)\b.*\bsexiest\b|\bsexiest\b.*\bowner\b/.test(q)) {
+    return { reply: 'Typically Bruno, or Tucker when Tucker shaves his rectum.', confidence: 'exact' };
+  }
   const tradeAnswer = answerTradeGrades(a, q); if (tradeAnswer) return tradeAnswer;
   if (/(championship|title|champion).*(most)|most.*(championship|title)/.test(q)) {
     const m = new Map(); for (const c of champions(a)) m.set(c.owner, (m.get(c.owner)||0)+1);
