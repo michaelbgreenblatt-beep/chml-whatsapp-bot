@@ -24,3 +24,18 @@ test('answers last-place and ordinal standings questions from statistics', async
   assert.equal((await answerQuestion(archive, 'who came in last place in 2026?')).reply,
     '2026 does not have final standings yet.');
 });
+
+test('ranks drafting over an intuitive completed-season window', async () => {
+  const seasons = {};
+  for (const year of [2021, 2022, 2023, 2024, 2025]) seasons[year] = {
+    standings: [{ rank: 1 }],
+    draft: [
+      { id: 'a', owner: 'Alice', owners: ['Alice'] },
+      { id: 'b', owner: 'Bob', owners: ['Bob'] }
+    ],
+    games: [{ isFinal: true, stage: 'reg', left: { owner: 'Alice', owners: ['Alice'], rows: [{ id: 'a', group: 'Starters', points: 100 }] },
+      right: { owner: 'Bob', owners: ['Bob'], rows: [{ id: 'b', group: 'Starters', points: 80 }] } }]
+  };
+  const result = await answerQuestion({ years: Object.keys(seasons).map(Number), seasons }, 'who is the best drafter in the league last 5 years?');
+  assert.equal(result.reply, "By regular-season starter points from players who remained with their original drafter, Alice was CHML's best drafter over 2021–2025, averaging 100 points per season. Next: Bob (80).");
+});

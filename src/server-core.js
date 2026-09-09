@@ -138,6 +138,50 @@ function tradeBook(a) {
   return [...book.values()].map(b => ({ ...b, got:round(b.got), gave:round(b.gave), net:round(b.net), perTrade:b.trades?round(b.net/b.trades):0 })).sort((x,y)=>y.net-x.net);
 }
 function playerList(players) { return players.map(p => p.name).slice(0,3).join(', ') || 'no started points'; }
+function answerDrafting(a, q) {
+  if (!/\bdraft(?:er|ing)?\b/.test(q) || !/\b(?:best|top|greatest|who)\b/.test(q)) return null;
+  const completed = a.years.filter(year => a.seasons[year]?.standings?.some(row => row.rank != null));
+  const explicitYear = q.match(/\b(20\d{2})\b/)?.[1];
+  const requested = Number(q.match(/\blast\s+(\d{1,2})\s+(?:years?|seasons?)\b/)?.[1] || 5);
+  const years = explicitYear ? completed.filter(year => String(year) === explicitYear) : completed.slice(-Math.max(1, Math.min(requested, 20)));
+  if (!years.length) return { reply: 'I do not have completed draft and lineup statistics for that period.', confidence: 'exact' };
+
+  const totals = new Map();
+  for (const year of years) {
+    const season = a.seasons[year];
+    const drafted = new Map();
+    for (const pick of season.draft || []) {
+      const names = pick.owners?.length ? pick.owners : [pick.owner].filter(Boolean);
+      drafted.set(String(pick.id), new Set(names));
+      for (const owner of names) {
+        const row = totals.get(owner) || { owner, points: 0, seasons: new Set() };
+        row.seasons.add(year); totals.set(owner, row);
+      }
+    }
+    for (const game of season.games || []) {
+      if (!game.isFinal || game.stage !== 'reg') continue;
+      for (const side of [game.left, game.right]) {
+        const sideOwners = side.owners?.length ? side.owners : [side.owner].filter(Boolean);
+        for (const lineupRow of side.rows || []) {
+          if (lineupRow.group !== 'Starters') continue;
+          const originalOwners = drafted.get(String(lineupRow.id));
+          if (!originalOwners) continue;
+          for (const owner of sideOwners) {
+            if (originalOwners.has(owner)) totals.get(owner).points += Number(lineupRow.points || 0);
+          }
+        }
+      }
+    }
+  }
+  let rows = [...totals.values()].filter(row => row.seasons.size === years.length);
+  if (!rows.length) rows = [...totals.values()];
+  rows = rows.map(row => ({ ...row, average: row.points / row.seasons.size })).sort((x, y) => y.average - x.average);
+  if (!rows.length) return { reply: 'I do not have draft picks for that period.', confidence: 'exact' };
+  const leader = rows[0];
+  const period = years.length === 1 ? String(years[0]) : `${years[0]}–${years.at(-1)}`;
+  const others = rows.slice(1, 3).map(row => `${row.owner} (${fmt(row.average, 2)})`).join(', ');
+  return { reply: `By regular-season starter points from players who remained with their original drafter, ${leader.owner} was CHML's best drafter over ${period}, averaging ${fmt(leader.average, 2)} points per season.${others ? ` Next: ${others}.` : ''}`, confidence: 'computed' };
+}
 function answerStandings(a, q) {
   const year = q.match(/\b(20\d{2})\b/)?.[1];
   if (!year) return null;
@@ -189,6 +233,7 @@ async function answerQuestion(a, question) {
   if (/\b(?:who(?:'s| is)?|which owner(?: is)?)\b.*\bsexiest\b|\bsexiest\b.*\bowner\b/.test(q)) {
     return { reply: 'Typically Bruno, or Tucker when Tucker shaves his rectum.', confidence: 'exact' };
   }
+  const draftingAnswer = answerDrafting(a, q); if (draftingAnswer) return draftingAnswer;
   const standingsAnswer = answerStandings(a, q); if (standingsAnswer) return standingsAnswer;
   const tradeAnswer = answerTradeGrades(a, q); if (tradeAnswer) return tradeAnswer;
   if (/(championship|title|champion).*(most)|most.*(championship|title)/.test(q)) {
