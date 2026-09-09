@@ -1,10 +1,10 @@
-# CHML WhatsApp Bot Package
+# CHML WhatsApp Bot
 
-WhatsApp-ready Q&A service for the Chestnut Hill Memorial League archive.
+This is the simple version: one Node process logs into WhatsApp Web, watches the CHML group, and replies when tagged.
 
-The bot loads data from `https://chml-history.netlify.app` at startup, answers common CHML history/stat questions quickly, and exposes HTTP endpoints that OpenClaw, Hermes, or another WhatsApp bridge can call when the bot is tagged in the league group.
+It pulls league data from https://chml-history.netlify.app at startup and refreshes every 30 minutes by default. It does not pull from Sleeper at runtime.
 
-## Run
+## Run locally
 
 ```bash
 npm install
@@ -13,30 +13,48 @@ npm run smoke
 npm start
 ```
 
-## Endpoints
+When you run `npm start`, the terminal prints a WhatsApp QR code.
 
-- `GET /health`
-- `POST /ask` with `{ "text": "who has the most championships?" }`
-- `POST /webhook/openclaw` with tagged WhatsApp payloads
+Scan it from the bot WhatsApp account:
 
-Set `BOT_SHARED_SECRET` and send the same value as the `x-bot-secret` header from the bridge.
-
-## Data
-
-Default mode pulls from the public CHML site:
-
-```env
-CHML_DATA_MODE=remote
-CHML_DATA_BASE_URL=https://chml-history.netlify.app
+```text
+WhatsApp > Settings > Linked devices > Link a device
 ```
 
-For offline operation, set `CHML_DATA_MODE=local` and copy the CHML data files into `data/`.
+## Group matching
 
-## Deploy
+Default config watches any WhatsApp group whose name contains `CHML`:
 
-This is meant for a cheap VPS with Node 20+:
+```env
+WHATSAPP_GROUP_NAME=CHML
+WHATSAPP_GROUP_JID=
+```
+
+After the first successful run, lock it to the exact group JID by setting:
+
+```env
+WHATSAPP_GROUP_JID=120363xxxxxxxx@g.us
+```
+
+## How to use in WhatsApp
+
+In the CHML group, tag the bot or say `chmlbot`:
+
+```text
+@CHMLBot who has the most championships?
+chmlbot closest game ever?
+chmlbot Jordan vs Frank
+```
+
+## Cheap VPS deploy
+
+On an Ubuntu VPS:
 
 ```bash
+apt update
+apt install -y git curl
+curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
+apt install -y nodejs
 git clone https://github.com/michaelbgreenblatt-beep/chml-whatsapp-bot.git
 cd chml-whatsapp-bot
 npm install --omit=dev
@@ -44,4 +62,25 @@ cp .env.example .env
 npm start
 ```
 
-Use systemd, pm2, or Docker for production.
+Scan the QR once. The session is saved in `auth/whatsapp`.
+
+## Keeping it online
+
+Use pm2:
+
+```bash
+npm install -g pm2
+pm2 start src/whatsapp.js --name chml-whatsapp-bot
+pm2 save
+pm2 startup
+```
+
+Then the bot restarts if the server reboots.
+
+## Optional HTTP server
+
+The old HTTP webhook server is still available:
+
+```bash
+npm run server
+```
